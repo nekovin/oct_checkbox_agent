@@ -10,6 +10,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from loguru import logger
+import numpy as np
 
 from .pdf_processor import PDFProcessor
 from .ocr_engine import OCREngine
@@ -70,7 +71,10 @@ class IntelligentOCRAgent:
     def process_pdf(self, pdf_path: Path, 
                    use_template: bool = False,
                    save_debug: bool = False,
-                   detect_multiple_surveys: bool = True) -> ExtractionResult:
+                   detect_multiple_surveys: bool = True,
+                   max_pages: Optional[int] = None,
+                   max_surveys: Optional[int] = None,
+                   enhanced_ocr: bool = True) -> ExtractionResult:
         """
         Process a single PDF file with intelligent analysis.
         
@@ -79,6 +83,9 @@ class IntelligentOCRAgent:
             use_template: Whether to use loaded template
             save_debug: Whether to save debug images
             detect_multiple_surveys: Whether to detect multiple surveys in one PDF
+            max_pages: Maximum number of pages to process (for testing)
+            max_surveys: Maximum number of surveys to process (for testing)
+            enhanced_ocr: Whether to use enhanced OCR preprocessing
             
         Returns:
             Extraction result with intelligent analysis
@@ -94,10 +101,16 @@ class IntelligentOCRAgent:
             # Convert PDF to images
             pages = self.pdf_processor.process_pdf(pdf_path)
             
+            # Limit pages if specified for testing
+            if max_pages:
+                pages = pages[:max_pages]
+                logger.info(f"Limited processing to first {max_pages} pages for testing")
+            
             if self.intelligent_mode:
                 # Use intelligent processing
                 responses = self._process_pdf_intelligent(
-                    pages, use_template, save_debug, detect_multiple_surveys
+                    pages, use_template, save_debug, detect_multiple_surveys, 
+                    max_surveys, enhanced_ocr
                 )
             else:
                 # Fallback to basic processing
@@ -145,17 +158,24 @@ class IntelligentOCRAgent:
     def _process_pdf_intelligent(self, pages: List[Tuple], 
                                use_template: bool,
                                save_debug: bool,
-                               detect_multiple_surveys: bool) -> List[FormResponse]:
+                               detect_multiple_surveys: bool,
+                               max_surveys: Optional[int] = None,
+                               enhanced_ocr: bool = True) -> List[FormResponse]:
         """Process PDF using intelligent analysis."""
         
         all_responses = []
+        total_surveys_processed = 0
         
         for page_idx, (image, metadata) in enumerate(pages):
             try:
                 logger.info(f"Processing page {page_idx + 1} with intelligent analysis")
                 
-                # Step 1: Extract text using OCR
-                text_result = self.ocr_engine.extract_text(image)
+                # Step 1: Enhanced OCR text extraction
+                if enhanced_ocr:
+                    text_result = self._enhanced_ocr_extraction(image)
+                else:
+                    text_result = self.ocr_engine.extract_text(image)
+                
                 text_blocks = text_result.get('text_blocks', [])
                 
                 # Step 2: Detect multiple surveys if requested
@@ -166,23 +186,39 @@ class IntelligentOCRAgent:
                         
                         # Process each survey separately
                         for survey_idx, boundary in enumerate(survey_boundaries):
+                            # Check if we've reached the survey limit
+                            if max_surveys and total_surveys_processed >= max_surveys:
+                                logger.info(f"Reached maximum surveys limit ({max_surveys}), stopping processing")
+                                return all_responses
+                            
                             survey_responses = self._process_survey_section(
                                 image, text_blocks, boundary, metadata, 
-                                page_idx + 1, survey_idx + 1, save_debug
+                                page_idx + 1, survey_idx + 1, save_debug, enhanced_ocr
                             )
                             all_responses.extend(survey_responses)
+                            total_surveys_processed += 1
                     else:
                         # Single survey
+                        if max_surveys and total_surveys_processed >= max_surveys:
+                            logger.info(f"Reached maximum surveys limit ({max_surveys}), stopping processing")
+                            return all_responses
+                        
                         survey_responses = self._process_single_survey(
-                            image, text_blocks, metadata, page_idx + 1, save_debug
+                            image, text_blocks, metadata, page_idx + 1, save_debug, enhanced_ocr
                         )
                         all_responses.extend(survey_responses)
+                        total_surveys_processed += 1
                 else:
                     # Process as single survey
+                    if max_surveys and total_surveys_processed >= max_surveys:
+                        logger.info(f"Reached maximum surveys limit ({max_surveys}), stopping processing")
+                        return all_responses
+                    
                     survey_responses = self._process_single_survey(
-                        image, text_blocks, metadata, page_idx + 1, save_debug
+                        image, text_blocks, metadata, page_idx + 1, save_debug, enhanced_ocr
                     )
                     all_responses.extend(survey_responses)
+                    total_surveys_processed += 1
                 
             except Exception as e:
                 logger.error(f"Error in intelligent processing of page {page_idx + 1}: {e}")
@@ -192,7 +228,7 @@ class IntelligentOCRAgent:
         return all_responses
     
     def _process_single_survey(self, image, text_blocks, metadata, 
-                             page_number, save_debug) -> List[FormResponse]:
+                             page_number, save_debug, enhanced_ocr=True) -> List[FormResponse]:
         """Process a single survey using intelligent analysis."""
         
         try:
@@ -232,7 +268,7 @@ class IntelligentOCRAgent:
             return []
     
     def _process_survey_section(self, image, text_blocks, boundary, metadata,
-                              page_number, survey_index, save_debug) -> List[FormResponse]:
+                              page_number, survey_index, save_debug, enhanced_ocr=True) -> List[FormResponse]:
         """Process a specific survey section."""
         
         try:
@@ -257,7 +293,7 @@ class IntelligentOCRAgent:
             
             # Process the section as a single survey
             section_responses = self._process_single_survey(
-                section_image, section_text_blocks, metadata, page_number, save_debug
+                section_image, section_text_blocks, metadata, page_number, save_debug, enhanced_ocr
             )
             
             # Add survey identification to responses
@@ -477,12 +513,287 @@ class IntelligentOCRAgent:
         
         return response
     
+    def _enhanced_ocr_extraction(self, image):
+        """Enhanced OCR extraction with better preprocessing for text and box identification."""
+        
+        try:
+            import cv2
+            import numpy as np
+            
+            # Create a copy for processing
+            processed_image = image.copy()
+            
+            # Step 1: Convert to grayscale if needed
+            if len(processed_image.shape) == 3:
+                gray = cv2.cvtColor(processed_image, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = processed_image
+            
+            # Step 2: Enhanced preprocessing for better OCR
+            
+            # Noise reduction
+            denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+            
+            # Contrast enhancement using CLAHE
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(denoised)
+            
+            # Deskewing (basic rotation correction)
+            coords = np.column_stack(np.where(enhanced > 0))
+            if len(coords) > 0:
+                angle = cv2.minAreaRect(coords)[-1]
+                if angle < -45:
+                    angle = -(90 + angle)
+                else:
+                    angle = -angle
+                
+                if abs(angle) > 0.5:  # Only correct if significant skew
+                    (h, w) = enhanced.shape[:2]
+                    center = (w // 2, h // 2)
+                    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                    enhanced = cv2.warpAffine(enhanced, M, (w, h), 
+                                            flags=cv2.INTER_CUBIC, 
+                                            borderMode=cv2.BORDER_REPLICATE)
+            
+            # Step 3: Multiple OCR strategies for better accuracy
+            
+            # Strategy 1: Standard OCR with enhanced image
+            result1 = self.ocr_engine.extract_text(enhanced, preprocess=False)
+            
+            # Strategy 2: Binary threshold for crisp text
+            _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            result2 = self.ocr_engine.extract_text(binary, preprocess=False)
+            
+            # Strategy 3: Adaptive threshold for varied lighting
+            adaptive = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                           cv2.THRESH_BINARY, 11, 2)
+            result3 = self.ocr_engine.extract_text(adaptive, preprocess=False)
+            
+            # Step 4: Merge results and choose best
+            best_result = self._select_best_ocr_result([result1, result2, result3])
+            
+            # Step 5: Enhance text block detection
+            enhanced_text_blocks = self._enhance_text_block_detection(enhanced, best_result.get('text_blocks', []))
+            best_result['text_blocks'] = enhanced_text_blocks
+            
+            # Step 6: Detect and separate checkbox regions for better identification
+            checkbox_regions = self._detect_enhanced_checkbox_regions(enhanced)
+            best_result['checkbox_regions'] = checkbox_regions
+            
+            logger.debug(f"Enhanced OCR extracted {len(enhanced_text_blocks)} text blocks and {len(checkbox_regions)} checkbox regions")
+            
+            return best_result
+            
+        except Exception as e:
+            logger.warning(f"Enhanced OCR failed, falling back to standard: {e}")
+            return self.ocr_engine.extract_text(image)
+    
+    def _select_best_ocr_result(self, results):
+        """Select the best OCR result based on confidence and text amount."""
+        
+        best_result = results[0]
+        best_score = 0
+        
+        for result in results:
+            # Calculate score based on confidence and text amount
+            confidence = result.get('confidence', 0)
+            text_blocks = result.get('text_blocks', [])
+            text_amount = sum(len(block.get('text', '')) for block in text_blocks)
+            
+            # Score combines confidence and text detection
+            score = confidence * 0.7 + min(text_amount / 1000, 1.0) * 0.3
+            
+            if score > best_score:
+                best_score = score
+                best_result = result
+        
+        return best_result
+    
+    def _enhance_text_block_detection(self, image, text_blocks):
+        """Enhance text block detection by merging nearby blocks and improving boundaries."""
+        
+        if not text_blocks:
+            return text_blocks
+        
+        enhanced_blocks = []
+        
+        for block in text_blocks:
+            bbox = block.get('bbox', {})
+            if not bbox:
+                continue
+            
+            # Expand bounding box slightly for better capture
+            x = max(0, bbox.get('x', 0) - 2)
+            y = max(0, bbox.get('y', 0) - 2)
+            w = bbox.get('width', 0) + 4
+            h = bbox.get('height', 0) + 4
+            
+            # Ensure within image bounds
+            h_img, w_img = image.shape[:2]
+            w = min(w, w_img - x)
+            h = min(h, h_img - y)
+            
+            enhanced_bbox = {
+                'x': x, 'y': y, 'width': w, 'height': h
+            }
+            
+            enhanced_block = block.copy()
+            enhanced_block['bbox'] = enhanced_bbox
+            enhanced_blocks.append(enhanced_block)
+        
+        # Merge nearby text blocks that likely belong together
+        merged_blocks = self._merge_nearby_text_blocks(enhanced_blocks)
+        
+        return merged_blocks
+    
+    def _merge_nearby_text_blocks(self, blocks, distance_threshold=20):
+        """Merge text blocks that are close to each other."""
+        
+        if len(blocks) <= 1:
+            return blocks
+        
+        merged = []
+        used = set()
+        
+        for i, block1 in enumerate(blocks):
+            if i in used:
+                continue
+            
+            bbox1 = block1.get('bbox', {})
+            if not bbox1:
+                merged.append(block1)
+                continue
+            
+            # Find nearby blocks
+            group = [block1]
+            used.add(i)
+            
+            for j, block2 in enumerate(blocks[i+1:], i+1):
+                if j in used:
+                    continue
+                
+                bbox2 = block2.get('bbox', {})
+                if not bbox2:
+                    continue
+                
+                # Check if blocks are close
+                distance = self._calculate_block_distance(bbox1, bbox2)
+                
+                if distance <= distance_threshold:
+                    group.append(block2)
+                    used.add(j)
+            
+            if len(group) > 1:
+                # Merge the group
+                merged_block = self._merge_text_block_group(group)
+                merged.append(merged_block)
+            else:
+                merged.append(block1)
+        
+        return merged
+    
+    def _calculate_block_distance(self, bbox1, bbox2):
+        """Calculate distance between two bounding boxes."""
+        
+        x1, y1 = bbox1.get('x', 0), bbox1.get('y', 0)
+        w1, h1 = bbox1.get('width', 0), bbox1.get('height', 0)
+        
+        x2, y2 = bbox2.get('x', 0), bbox2.get('y', 0)
+        w2, h2 = bbox2.get('width', 0), bbox2.get('height', 0)
+        
+        # Calculate center points
+        cx1, cy1 = x1 + w1/2, y1 + h1/2
+        cx2, cy2 = x2 + w2/2, y2 + h2/2
+        
+        return ((cx1 - cx2)**2 + (cy1 - cy2)**2)**0.5
+    
+    def _merge_text_block_group(self, group):
+        """Merge a group of text blocks into one."""
+        
+        # Combine text
+        texts = [block.get('text', '') for block in group]
+        combined_text = ' '.join(filter(None, texts))
+        
+        # Calculate combined bounding box
+        bboxes = [block.get('bbox', {}) for block in group if block.get('bbox')]
+        
+        if bboxes:
+            min_x = min(bbox.get('x', 0) for bbox in bboxes)
+            min_y = min(bbox.get('y', 0) for bbox in bboxes)
+            max_x = max(bbox.get('x', 0) + bbox.get('width', 0) for bbox in bboxes)
+            max_y = max(bbox.get('y', 0) + bbox.get('height', 0) for bbox in bboxes)
+            
+            combined_bbox = {
+                'x': min_x, 'y': min_y,
+                'width': max_x - min_x, 'height': max_y - min_y
+            }
+        else:
+            combined_bbox = {}
+        
+        # Use best confidence from group
+        confidences = [block.get('confidence', 0) for block in group]
+        best_confidence = max(confidences) if confidences else 0
+        
+        return {
+            'text': combined_text,
+            'bbox': combined_bbox,
+            'confidence': best_confidence,
+            'merged_from': len(group)
+        }
+    
+    def _detect_enhanced_checkbox_regions(self, image):
+        """Detect regions that likely contain checkboxes with enhanced methods."""
+        
+        try:
+            import cv2
+            
+            checkbox_regions = []
+            
+            # Method 1: Detect rectangular patterns
+            contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if 50 < area < 1000:  # Reasonable checkbox size
+                    x, y, w, h = cv2.boundingRect(contour)
+                    aspect_ratio = w / h if h > 0 else 0
+                    
+                    # Check if square-like
+                    if 0.5 <= aspect_ratio <= 2.0:
+                        checkbox_regions.append({
+                            'bbox': (x, y, w, h),
+                            'type': 'rectangular',
+                            'confidence': 0.7
+                        })
+            
+            # Method 2: Detect circular patterns
+            circles = cv2.HoughCircles(image, cv2.HOUGH_GRADIENT, dp=1, minDist=30,
+                                     param1=50, param2=30, minRadius=5, maxRadius=25)
+            
+            if circles is not None:
+                circles = np.round(circles[0, :]).astype("int")
+                for (x, y, r) in circles:
+                    checkbox_regions.append({
+                        'bbox': (x-r, y-r, 2*r, 2*r),
+                        'type': 'circular',
+                        'confidence': 0.6
+                    })
+            
+            return checkbox_regions
+            
+        except Exception as e:
+            logger.warning(f"Enhanced checkbox region detection failed: {e}")
+            return []
+    
     # Keep the same batch processing methods but update them to use intelligent processing
     def process_batch(self, input_paths: List[Path], 
                      output_file: Optional[Path] = None,
                      parallel: bool = True,
                      save_debug: bool = False,
-                     detect_multiple_surveys: bool = True) -> List[ExtractionResult]:
+                     detect_multiple_surveys: bool = True,
+                     max_pages: Optional[int] = None,
+                     max_surveys: Optional[int] = None,
+                     enhanced_ocr: bool = True) -> List[ExtractionResult]:
         """Process multiple PDF files in batch with intelligent analysis."""
         
         logger.info(f"Starting intelligent batch processing of {len(input_paths)} files")
@@ -492,7 +803,7 @@ class IntelligentOCRAgent:
         if parallel and len(input_paths) > 1:
             with ThreadPoolExecutor(max_workers=self.config.processing.parallel_workers) as executor:
                 future_to_path = {
-                    executor.submit(self.process_pdf, path, False, save_debug, detect_multiple_surveys): path
+                    executor.submit(self.process_pdf, path, False, save_debug, detect_multiple_surveys, max_pages, max_surveys, enhanced_ocr): path
                     for path in input_paths
                 }
                 
@@ -515,7 +826,7 @@ class IntelligentOCRAgent:
                         ))
         else:
             for pdf_path in tqdm(input_paths, desc="Processing PDFs"):
-                result = self.process_pdf(pdf_path, False, save_debug, detect_multiple_surveys)
+                result = self.process_pdf(pdf_path, False, save_debug, detect_multiple_surveys, max_pages, max_surveys, enhanced_ocr)
                 results.append(result)
         
         if output_file:
@@ -592,6 +903,12 @@ def main():
                        help="Force basic mode (disable intelligent features)")
     parser.add_argument("--no-multi-survey", action="store_true",
                        help="Disable multiple survey detection")
+    parser.add_argument("--max-pages", type=int,
+                       help="Maximum number of pages to process (for testing)")
+    parser.add_argument("--max-surveys", type=int,
+                       help="Maximum number of surveys to process (for testing)")
+    parser.add_argument("--no-enhanced-ocr", action="store_true",
+                       help="Disable enhanced OCR preprocessing")
     
     args = parser.parse_args()
     
@@ -624,13 +941,17 @@ def main():
     # Process input
     input_path = Path(args.input)
     detect_multi_survey = not args.no_multi_survey
+    enhanced_ocr = not args.no_enhanced_ocr
     
     if input_path.is_file():
         # Single file processing
         result = agent.process_pdf(
             input_path, 
             save_debug=args.debug,
-            detect_multiple_surveys=detect_multi_survey
+            detect_multiple_surveys=detect_multi_survey,
+            max_pages=args.max_pages,
+            max_surveys=args.max_surveys,
+            enhanced_ocr=enhanced_ocr
         )
         
         if args.output:
@@ -657,7 +978,10 @@ def main():
             pdf_files, 
             parallel=args.parallel,
             save_debug=args.debug,
-            detect_multiple_surveys=detect_multi_survey
+            detect_multiple_surveys=detect_multi_survey,
+            max_pages=args.max_pages,
+            max_surveys=args.max_surveys,
+            enhanced_ocr=enhanced_ocr
         )
         
         # Save consolidated results
