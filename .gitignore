@@ -209,3 +209,4 @@ Thumbs.db
 test_pdfs/
 sample_large/
 benchmark_data/node_modules/
+node_modules/
