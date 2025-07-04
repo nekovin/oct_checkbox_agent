@@ -1,0 +1,42 @@
+{
+  "name": "Customer Satisfaction Survey",
+  "version": "1.0",
+  "fields": {
+    "overall_satisfaction": {
+      "type": "checkbox",
+      "options": ["Very Satisfied", "Satisfied", "Neutral", "Dissatisfied", "Very Dissatisfied"],
+      "description": "Overall satisfaction with our service"
+    },
+    "recommend_service": {
+      "type": "checkbox",
+      "options": ["Yes", "No"],
+      "description": "Would you recommend our service to others?"
+    },
+    "contact_again": {
+      "type": "checkbox",
+      "options": ["Yes", "No"],
+      "description": "May we contact you for follow-up?"
+    },
+    "service_areas": {
+      "type": "checkbox",
+      "options": ["Customer Support", "Product Quality", "Delivery", "Pricing", "Website"],
+      "description": "Which areas met your expectations? (Check all that apply)"
+    }
+  },
+  "checkbox_regions": {
+    "satisfaction_section": {
+      "x": 50,
+      "y": 100,
+      "width": 500,
+      "height": 200,
+      "description": "Main satisfaction questions"
+    },
+    "recommendations_section": {
+      "x": 50,
+      "y": 320,
+      "width": 500,
+      "height": 150,
+      "description": "Recommendation questions"
+    }
+  }
+}

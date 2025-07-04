@@ -1,0 +1,32 @@
+{
+  "ocr": {
+    "language": "eng",
+    "psm": 6,
+    "oem": 3,
+    "confidence_threshold": 0.6
+  },
+  "checkbox_detection": {
+    "min_checkbox_size": 12,
+    "max_checkbox_size": 45,
+    "checkbox_aspect_ratio_threshold": 0.2,
+    "binary_threshold": 127,
+    "contour_area_threshold": 120,
+    "checkbox_fill_threshold": 0.3
+  },
+  "processing": {
+    "dpi": 300,
+    "parallel_workers": 4,
+    "batch_size": 10,
+    "max_retries": 3,
+    "enable_preprocessing": true
+  },
+  "output": {
+    "output_format": "csv",
+    "include_confidence_scores": true,
+    "include_metadata": true,
+    "timestamp_format": "%Y-%m-%d_%H-%M-%S"
+  },
+  "temp_dir": "./temp",
+  "output_dir": "./output",
+  "template_dir": "./templates"
+}

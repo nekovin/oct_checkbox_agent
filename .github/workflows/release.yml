@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tesseract-ocr poppler-utils
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r ocr_checkbox_agent/requirements.txt
+        pip install pytest
+
+    - name: Run tests
+      run: |
+        cd ocr_checkbox_agent
+        pytest tests/ -v
+
+  build-and-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package
+      run: |
+        python -m build
+
+    - name: Publish to PyPI
+      if: startsWith(github.ref, 'refs/tags/')
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        twine upload dist/*
+
+  create-release:
+    needs: [test, build-and-publish]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Get tag name
+      id: tag
+      run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Extract changelog
+      id: changelog
+      run: |
+        # Extract changelog section for this version
+        VERSION="${{ steps.tag.outputs.TAG }}"
+        VERSION_NO_V="${VERSION#v}"
+        
+        # Create release notes from CHANGELOG.md
+        awk -v version="[$VERSION_NO_V]" '
+        BEGIN { found=0; content="" }
+        /^## \[/ { 
+          if (found) exit
+          if ($0 ~ version) found=1
+          next
+        }
+        found && /^## \[/ { exit }
+        found { content = content $0 "\n" }
+        END { print content }
+        ' CHANGELOG.md > release_notes.md
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.TAG }}
+        release_name: Release ${{ steps.tag.outputs.TAG }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: false
+
+    - name: Build package for release
+      run: |
+        python -m pip install --upgrade pip build
+        python -m build
+
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: dist/
+        asset_name: ocr-checkbox-agent-${{ steps.tag.outputs.TAG }}.tar.gz
+        asset_content_type: application/gzip
