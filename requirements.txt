@@ -1,0 +1,25 @@
+# Core dependencies
+numpy>=1.21.0
+opencv-python>=4.5.0
+pillow>=8.0.0
+pdf2image>=1.16.0
+pytesseract>=0.3.8
+boxdetect>=1.0.0
+
+# Scientific computing
+scipy>=1.7.0
+scikit-learn>=1.0.0
+
+# Visualization
+matplotlib>=3.3.0
+
+# Utilities
+imutils>=0.5.4
+pyyaml>=5.4.0
+joblib>=1.0.0
+
+# Optional: For enhanced image processing
+# scikit-image>=0.18.0
+
+# Optional: For improved OCR
+# easyocr>=1.6.0
