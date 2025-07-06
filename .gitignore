@@ -1,1 +1,66 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Project specific files
 *.pdf
+*.png
+*.jpg
+*.jpeg
+output/
+temp_*
+*.csv
+*.json
+checkbox_*
+survey_results*
+boxes_detected*
+final_*
+test_*
+
+# Temporary and testing files
+measure_*
+quick_*
+enhanced_*
+simple_*
+quality_*
+text_*
+*.log
+
+# Example outputs
+examples/output/
+batch_output/
+selective_output/
+high_res_output/
+small_checkbox_output/
+quality_output/
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
